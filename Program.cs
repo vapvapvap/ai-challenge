@@ -7,6 +7,8 @@ const int ExitOk = 0;
 const int ExitApiError = 1;
 const int ExitUsage = 2;
 
+const string DefaultConfigPath = @"C:\Props\llm-cli.properties";
+
 Console.OutputEncoding = new UTF8Encoding(false);
 
 var JsonOpts = new JsonSerializerOptions
@@ -54,7 +56,7 @@ string prompt = string.Join(' ', positionals);
 string? resolvedConfig = ResolveConfigPath(configPath);
 if (resolvedConfig is null)
 {
-    Console.Error.WriteLine("Ошибка: файл настроек не найден. Создайте app.properties рядом с исполняемым файлом или укажите --config <путь>.");
+    Console.Error.WriteLine("Ошибка: файл настроек не найден. Создайте C:\\Props\\llm-cli.properties или укажите --config <путь>.");
     return ExitUsage;
 }
 
@@ -96,8 +98,13 @@ if (model.Length == 0)
 }
 
 double? temperature = TryParseDouble(props.GetValueOrDefault("temperature"));
+double? topP = TryParseDouble(props.GetValueOrDefault("top_p"));
 int? maxTokens = TryParseInt(props.GetValueOrDefault("max_tokens"));
 double timeoutSeconds = props.GetValueOrDefault("timeout_seconds", "120") is { } rawT && double.TryParse(rawT, out double t) && t > 0 ? t : 120;
+
+string? thinking = props.GetValueOrDefault("thinking")?.Trim().ToLowerInvariant();
+if (thinking is not ("enabled" or "disabled"))
+    thinking = null;
 
 var payload = new ChatRequest
 {
@@ -105,8 +112,30 @@ var payload = new ChatRequest
     Messages = new List<ChatMessage> { new() { Content = prompt } },
     Stream = false,
     Temperature = temperature,
+    TopP = topP,
     MaxTokens = maxTokens,
+    Thinking = thinking is null ? null : new ThinkingMode { Type = thinking },
 };
+
+string? masterPath = ResolveMasterPromptPath();
+if (masterPath is not null)
+{
+    string masterPrompt;
+    try
+    {
+        masterPrompt = File.ReadAllText(masterPath).Trim();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Ошибка чтения файла '{masterPath}': {ex.Message}");
+        return ExitUsage;
+    }
+
+    if (masterPrompt.Length > 0)
+    {
+        payload.Messages.Insert(0, new ChatMessage { Role = "system", Content = masterPrompt });
+    }
+}
 
 string requestBody = JsonSerializer.Serialize(payload, JsonOpts);
 string endpoint = baseUrl + "/chat/completions";
@@ -168,10 +197,15 @@ string? ResolveConfigPath(string? explicitPath)
         return File.Exists(explicitPath) ? explicitPath : null;
     }
 
+    return File.Exists(DefaultConfigPath) ? DefaultConfigPath : null;
+}
+
+string? ResolveMasterPromptPath()
+{
     string[] candidates =
     {
-        Path.Combine(AppContext.BaseDirectory, "app.properties"),
-        Path.Combine(Directory.GetCurrentDirectory(), "app.properties"),
+        Path.Combine(AppContext.BaseDirectory, "master_prompt.txt"),
+        Path.Combine(Directory.GetCurrentDirectory(), "master_prompt.txt"),
     };
 
     return candidates.FirstOrDefault(File.Exists);
@@ -223,11 +257,16 @@ void PrintUsage()
     Console.WriteLine("Использование: llm-cli [--config <файл.properties>] \"<текст запроса>\"");
     Console.WriteLine();
     Console.WriteLine("Аргументы:");
-    Console.WriteLine("  --config, -c <путь>   путь к файлу настроек (по умолчанию app.properties рядом с exe, затем текущая папка)");
+    Console.WriteLine("  --config, -c <путь>   путь к файлу настроек (по умолчанию C:\\Props\\llm-cli.properties)");
     Console.WriteLine("  -h, --help            показать эту справку");
     Console.WriteLine();
-    Console.WriteLine("Файл настроек (ключ=значение): base_url, api_key, model, temperature, max_tokens, timeout_seconds.");
+    Console.WriteLine("Файл настроек (ключ=значение): base_url, api_key, model, temperature, top_p, max_tokens, timeout_seconds, thinking.");
+    Console.WriteLine("thinking=enabled|disabled — режим размышлений модели (DeepSeek); для стабильных ответов используйте");
+    Console.WriteLine("temperature=0 и thinking=disabled (полной детерминированности API не гарантирует).");
     Console.WriteLine("api_key также можно задать переменными окружения LLM_API_KEY или DEEPSEEK_API_KEY.");
+    Console.WriteLine();
+    Console.WriteLine("Файл master_prompt.txt (рядом с exe или в текущей папке): если существует и непустой,");
+    Console.WriteLine("его содержимое добавляется в начало запроса как системное сообщение (role=system).");
     Console.WriteLine();
     Console.WriteLine("Коды возврата: 0 — успех; 1 — ошибка API/сети; 2 — ошибка использования/конфига.");
 }
@@ -238,7 +277,14 @@ internal sealed class ChatRequest
     [JsonPropertyName("messages")] public List<ChatMessage> Messages { get; set; } = new();
     [JsonPropertyName("stream")] public bool Stream { get; set; }
     [JsonPropertyName("temperature")] public double? Temperature { get; set; }
+    [JsonPropertyName("top_p")] public double? TopP { get; set; }
     [JsonPropertyName("max_tokens")] public int? MaxTokens { get; set; }
+    [JsonPropertyName("thinking")] public ThinkingMode? Thinking { get; set; }
+}
+
+internal sealed class ThinkingMode
+{
+    [JsonPropertyName("type")] public string Type { get; set; } = "";
 }
 
 internal sealed class ChatMessage
