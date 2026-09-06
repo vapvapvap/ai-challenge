@@ -45,7 +45,7 @@
 - `app.properties`: оставлены активные настройки `L2` (`temperature=0`, `top_p=0.01`, `thinking=disabled`); добавлены закомментированные примеры новых ключей `presence_penalty`, `frequency_penalty`, `stop`.
 - `AGENTS.md` / `Summary.md`: уточнено, что `L2` теперь соответствует `main` (CLI-опции присутствуют), но с фикс. путём конфига и `master_prompt.txt`.
 - Сборка и смоук-тесты пройдены (фикс. путь без `--config`, `--stop`, инъекция `master_prompt.txt`).
-- Commit: `<после merge>`
+- Commit: `bb21edb`
 
 ### Ветка L1 — от main
 - Создана от `main` и запушена; указывает на `0490eac`.
