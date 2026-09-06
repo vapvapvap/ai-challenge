@@ -9,7 +9,7 @@
 - `Program.cs`: флаг `--stats` — выводит в **stderr** метрики запроса: полное время (Stopwatch), токены из `usage` (`prompt/completion/total`), выходные токены/с, стоимость по официальному прайсу DeepSeek (CNY/1M, тарифы непик и пик; встроенная таблица для `deepseek-v4-flash` 1.5/4.5, `deepseek-v4-pro` 4.5/13.5, `deepseek-v4-flash-vision-exp` 1.5/4.5; неизвестная модель — цена недоступна). Стандартный вывод (stdout) не меняется.
 - Прогон одного вопроса («Сорока летит, а собака на хвосте сидит…») на трёх моделях при `temperature=0`, `thinking=disabled`; результаты — отдельный файл эксперимента `Results-L5.md`.
 - Прайс взят с https://api-docs.deepseek.com/quick_start/pricing (CNY за 1M токенов, вход без кэш-хита).
-- Commit: (указать после коммита)
+- Commit: `1779b59`
 
 ### Ветка main — CLI-опции выбора модели и параметров
 - `Program.cs`: добавлены CLI-флаги, перекрывающие файл настроек (приоритет: CLI > файл > дефолт): `--model|-m`, `--temperature|-t`, `--top-p`, `--max-tokens`, `--presence-penalty`, `--frequency-penalty`, `--thinking enabled|disabled|on|off`, `--timeout|--timeout-seconds`, `--base-url`. Поддержка формы `--опция=значение`; неизвестные опции — ошибка использования (exit 2).
