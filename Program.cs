@@ -19,29 +19,85 @@ var JsonOpts = new JsonSerializerOptions
 
 string? configPath = null;
 var positionals = new List<string>();
+var overrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-for (int i = 0; i < args.Length; i++)
+try
 {
-    switch (args[i])
+    for (int i = 0; i < args.Length; i++)
     {
-        case "--config" or "-c":
+        string arg = args[i];
+
+        if (!arg.StartsWith('-') && !arg.StartsWith('/'))
+        {
+            positionals.Add(arg);
+            continue;
+        }
+
+        string name = arg;
+        string? inlineValue = null;
+        int eq = arg.IndexOf('=');
+        if (eq > 0)
+        {
+            name = arg[..eq];
+            inlineValue = arg[(eq + 1)..];
+        }
+
+        string Value()
+        {
+            if (inlineValue is not null)
+                return inlineValue;
             if (i + 1 >= args.Length)
-            {
-                Console.Error.WriteLine("Ошибка: после --config ожидается путь к файлу.");
-                return ExitUsage;
-            }
-            configPath = args[++i];
-            break;
-        case "--help" or "-h" or "/?":
-            PrintUsage();
-            return ExitOk;
-        default:
-            if (args[i].StartsWith("--config=", StringComparison.Ordinal))
-                configPath = args[i]["--config=".Length..];
-            else
-                positionals.Add(args[i]);
-            break;
+                throw new ArgumentException($"после {name} ожидается значение.");
+            return args[++i];
+        }
+
+        switch (name)
+        {
+            case "--config" or "-c":
+                configPath = Value();
+                break;
+            case "--help" or "-h" or "/?":
+                PrintUsage();
+                return ExitOk;
+            case "--model" or "-m":
+                overrides["model"] = Value();
+                break;
+            case "--temperature" or "-t":
+                overrides["temperature"] = Value();
+                break;
+            case "--top-p":
+                overrides["top_p"] = Value();
+                break;
+            case "--max-tokens":
+                overrides["max_tokens"] = Value();
+                break;
+            case "--presence-penalty":
+                overrides["presence_penalty"] = Value();
+                break;
+            case "--frequency-penalty":
+                overrides["frequency_penalty"] = Value();
+                break;
+            case "--thinking":
+                overrides["thinking"] = Value();
+                break;
+            case "--timeout" or "--timeout-seconds":
+                overrides["timeout_seconds"] = Value();
+                break;
+            case "--base-url":
+                overrides["base_url"] = Value();
+                break;
+            case "--stop":
+                overrides["stop"] = Value();
+                break;
+            default:
+                throw new ArgumentException($"неизвестный аргумент: {arg}.");
+        }
     }
+}
+catch (ArgumentException ex)
+{
+    Console.Error.WriteLine($"Ошибка: {ex.Message}");
+    return ExitUsage;
 }
 
 if (positionals.Count == 0)
@@ -83,28 +139,66 @@ if (apiKey.Length == 0)
     return ExitUsage;
 }
 
-string baseUrl = props.GetValueOrDefault("base_url", "https://api.deepseek.com").Trim().TrimEnd('/');
+string GetSetting(string key, string? def)
+{
+    if (overrides.TryGetValue(key, out string? cliValue))
+        return cliValue.Trim();
+    if (props.TryGetValue(key, out string? fileValue))
+        return fileValue.Trim();
+    return def ?? "";
+}
+
+string baseUrl = GetSetting("base_url", "https://api.deepseek.com").TrimEnd('/');
 if (baseUrl.Length == 0)
 {
-    Console.Error.WriteLine("Ошибка: пустой base_url в файле настроек.");
+    Console.Error.WriteLine("Ошибка: пустой base_url.");
     return ExitUsage;
 }
 
-string model = props.GetValueOrDefault("model", "deepseek-v4-flash").Trim();
+string model = GetSetting("model", "deepseek-v4-flash");
 if (model.Length == 0)
 {
-    Console.Error.WriteLine("Ошибка: пустой model в файле настроек.");
+    Console.Error.WriteLine("Ошибка: пустой model.");
     return ExitUsage;
 }
 
-double? temperature = TryParseDouble(props.GetValueOrDefault("temperature"));
-double? topP = TryParseDouble(props.GetValueOrDefault("top_p"));
-int? maxTokens = TryParseInt(props.GetValueOrDefault("max_tokens"));
-double timeoutSeconds = props.GetValueOrDefault("timeout_seconds", "120") is { } rawT && double.TryParse(rawT, out double t) && t > 0 ? t : 120;
+double? temperature = TryParseDouble(GetSetting("temperature", null));
+double? topP = TryParseDouble(GetSetting("top_p", null));
+double? presencePenalty = TryParseDouble(GetSetting("presence_penalty", null));
+double? frequencyPenalty = TryParseDouble(GetSetting("frequency_penalty", null));
+int? maxTokens = TryParseInt(GetSetting("max_tokens", null));
 
-string? thinking = props.GetValueOrDefault("thinking")?.Trim().ToLowerInvariant();
-if (thinking is not ("enabled" or "disabled"))
-    thinking = null;
+string rawStop = GetSetting("stop", null);
+List<string>? stops = null;
+if (rawStop.Length > 0)
+{
+    stops = rawStop.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+    if (stops.Count == 0 || stops.Count > 16)
+    {
+        Console.Error.WriteLine("Ошибка: stop должен содержать от 1 до 16 последовательностей, разделённых '|'.");
+        return ExitUsage;
+    }
+}
+
+string rawTimeout = GetSetting("timeout_seconds", "120");
+double timeoutSeconds = double.TryParse(rawTimeout, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double timeoutVal) && timeoutVal > 0 ? timeoutVal : 120;
+
+ChatThinking? thinking = null;
+string rawThinking = GetSetting("thinking", null);
+if (rawThinking.Length > 0)
+{
+    thinking = rawThinking.ToLowerInvariant() switch
+    {
+        "enabled" or "on" => new ChatThinking { Type = "enabled" },
+        "disabled" or "off" => new ChatThinking { Type = "disabled" },
+        _ => null,
+    };
+    if (thinking is null)
+    {
+        Console.Error.WriteLine("Ошибка: thinking должен быть enabled, disabled, on или off.");
+        return ExitUsage;
+    }
+}
 
 var payload = new ChatRequest
 {
@@ -114,7 +208,10 @@ var payload = new ChatRequest
     Temperature = temperature,
     TopP = topP,
     MaxTokens = maxTokens,
-    Thinking = thinking is null ? null : new ThinkingMode { Type = thinking },
+    PresencePenalty = presencePenalty,
+    FrequencyPenalty = frequencyPenalty,
+    Thinking = thinking,
+    Stop = stops,
 };
 
 string? masterPath = ResolveMasterPromptPath();
@@ -254,15 +351,27 @@ string? ExtractErrorMessage(string body)
 
 void PrintUsage()
 {
-    Console.WriteLine("Использование: llm-cli [--config <файл.properties>] \"<текст запроса>\"");
+    Console.WriteLine("Использование: llm-cli [опции] \"<текст запроса>\"");
     Console.WriteLine();
     Console.WriteLine("Аргументы:");
     Console.WriteLine("  --config, -c <путь>   путь к файлу настроек (по умолчанию C:\\Props\\llm-cli.properties)");
     Console.WriteLine("  -h, --help            показать эту справку");
     Console.WriteLine();
-    Console.WriteLine("Файл настроек (ключ=значение): base_url, api_key, model, temperature, top_p, max_tokens, timeout_seconds, thinking.");
-    Console.WriteLine("thinking=enabled|disabled — режим размышлений модели (DeepSeek); для стабильных ответов используйте");
-    Console.WriteLine("temperature=0 и thinking=disabled (полной детерминированности API не гарантирует).");
+    Console.WriteLine("Опции переопределяют файл настроек (приоритет: опция > файл > значение по умолчанию):");
+    Console.WriteLine("  --model, -m <id>          модель (deepseek-v4-flash | deepseek-v4-pro | deepseek-v4-flash-vision-exp)");
+    Console.WriteLine("  --temperature, -t <число> температура сэмплирования");
+    Console.WriteLine("  --top-p <0..1>            nucleus sampling (top_k API DeepSeek не поддерживает)");
+    Console.WriteLine("  --max-tokens <int>        максимум токенов в ответе");
+    Console.WriteLine("  --presence-penalty <число>  штраф за повторение тем (-2..2)");
+    Console.WriteLine("  --frequency-penalty <число> штраф за повторение токенов (-2..2)");
+    Console.WriteLine("  --thinking <enabled|disabled|on|off>  режим рассуждений модели");
+    Console.WriteLine("  --timeout, --timeout-seconds <сек>    таймаут запроса");
+    Console.WriteLine("  --base-url <url>          адрес API (по умолчанию https://api.deepseek.com)");
+    Console.WriteLine("  --stop <seq1>|<seq2>...    до 16 последовательностей через '|'; API обрывает генерацию");
+    Console.WriteLine("  Допустима форма --опция=значение, например --model=deepseek-v4-pro.");
+    Console.WriteLine();
+    Console.WriteLine("Файл настроек (ключ=значение): base_url, api_key, model, temperature, top_p, max_tokens,");
+    Console.WriteLine("presence_penalty, frequency_penalty, thinking, timeout_seconds, stop.");
     Console.WriteLine("api_key также можно задать переменными окружения LLM_API_KEY или DEEPSEEK_API_KEY.");
     Console.WriteLine();
     Console.WriteLine("Файл master_prompt.txt (рядом с exe или в текущей папке): если существует и непустой,");
@@ -279,18 +388,21 @@ internal sealed class ChatRequest
     [JsonPropertyName("temperature")] public double? Temperature { get; set; }
     [JsonPropertyName("top_p")] public double? TopP { get; set; }
     [JsonPropertyName("max_tokens")] public int? MaxTokens { get; set; }
-    [JsonPropertyName("thinking")] public ThinkingMode? Thinking { get; set; }
-}
-
-internal sealed class ThinkingMode
-{
-    [JsonPropertyName("type")] public string Type { get; set; } = "";
+    [JsonPropertyName("presence_penalty")] public double? PresencePenalty { get; set; }
+    [JsonPropertyName("frequency_penalty")] public double? FrequencyPenalty { get; set; }
+    [JsonPropertyName("thinking")] public ChatThinking? Thinking { get; set; }
+    [JsonPropertyName("stop")] public List<string>? Stop { get; set; }
 }
 
 internal sealed class ChatMessage
 {
     [JsonPropertyName("role")] public string Role { get; set; } = "user";
     [JsonPropertyName("content")] public string Content { get; set; } = "";
+}
+
+internal sealed class ChatThinking
+{
+    [JsonPropertyName("type")] public string Type { get; set; } = "enabled";
 }
 
 internal sealed class ChatResponse
