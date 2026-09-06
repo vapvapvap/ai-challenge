@@ -16,6 +16,7 @@ var JsonOpts = new JsonSerializerOptions
 };
 
 string? configPath = null;
+bool stats = false;
 var positionals = new List<string>();
 var overrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -83,6 +84,9 @@ try
                 break;
             case "--base-url":
                 overrides["base_url"] = Value();
+                break;
+            case "--stats":
+                stats = true;
                 break;
             default:
                 throw new ArgumentException($"неизвестный аргумент: {arg}.");
@@ -204,11 +208,15 @@ client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bear
 client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
 string responseBody;
+double elapsedMs = 0;
+var requestStopwatch = System.Diagnostics.Stopwatch.StartNew();
 try
 {
     using var httpContent = new StringContent(requestBody, Encoding.UTF8, "application/json");
     using HttpResponseMessage response = await client.PostAsync(endpoint, httpContent);
     responseBody = await response.Content.ReadAsStringAsync();
+    requestStopwatch.Stop();
+    elapsedMs = requestStopwatch.Elapsed.TotalMilliseconds;
 
     if (!response.IsSuccessStatusCode)
     {
@@ -241,6 +249,10 @@ try
     }
 
     Console.WriteLine(text);
+
+    if (stats)
+        PrintStats(model, elapsedMs, parsed?.Usage);
+
     return ExitOk;
 }
 catch (JsonException ex)
@@ -306,6 +318,46 @@ string? ExtractErrorMessage(string body)
     }
 }
 
+(double InputCnyPerM, double OutputCnyPerM)? PriceCny(string model) => model switch
+{
+    "deepseek-v4-flash" => (1.5, 4.5),
+    "deepseek-v4-pro" => (4.5, 13.5),
+    "deepseek-v4-flash-vision-exp" => (1.5, 4.5),
+    _ => null,
+};
+
+void PrintStats(string model, double elapsedMs, ChatUsage? usage)
+{
+    string Num(double v) => v.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+
+    Console.Error.WriteLine($"[stats] model={model}");
+    Console.Error.WriteLine($"[stats] elapsed_ms={Num(elapsedMs)}");
+
+    if (usage is null)
+    {
+        Console.Error.WriteLine("[stats] usage=недоступно (API не вернул usage)");
+        return;
+    }
+
+    Console.Error.WriteLine($"[stats] prompt_tokens={usage.PromptTokens}");
+    Console.Error.WriteLine($"[stats] completion_tokens={usage.CompletionTokens}");
+    Console.Error.WriteLine($"[stats] total_tokens={usage.TotalTokens}");
+    if (usage.CompletionTokens > 0 && elapsedMs > 0)
+        Console.Error.WriteLine($"[stats] output_tokens_per_sec={Num(usage.CompletionTokens / (elapsedMs / 1000.0))}");
+
+    (double InCny, double OutCny)? price = PriceCny(model);
+    if (price is null)
+    {
+        Console.Error.WriteLine("[stats] cost=цена модели не задана в таблице");
+        return;
+    }
+
+    double costOffPeak = usage.PromptTokens / 1_000_000.0 * price.Value.InCny
+                        + usage.CompletionTokens / 1_000_000.0 * price.Value.OutCny;
+    Console.Error.WriteLine($"[stats] cost_cny_offpeak={Num(costOffPeak)}");
+    Console.Error.WriteLine($"[stats] cost_cny_peak={Num(costOffPeak * 2)}");
+}
+
 void PrintUsage()
 {
     Console.WriteLine("Использование: llm-cli [опции] \"<текст запроса>\"");
@@ -324,6 +376,7 @@ void PrintUsage()
     Console.WriteLine("  --thinking <enabled|disabled|on|off>  режим рассуждений модели");
     Console.WriteLine("  --timeout, --timeout-seconds <сек>    таймаут запроса");
     Console.WriteLine("  --base-url <url>          адрес API (по умолчанию https://api.deepseek.com)");
+    Console.WriteLine("  --stats                   вывести в stderr метрики запроса: время, токены (usage), стоимость (CNY)");
     Console.WriteLine("  Допустима форма --опция=значение, например --model=deepseek-v4-pro.");
     Console.WriteLine();
     Console.WriteLine("Файл настроек (ключ=значение): base_url, api_key, model, temperature, top_p, max_tokens,");
@@ -360,6 +413,14 @@ internal sealed class ChatThinking
 internal sealed class ChatResponse
 {
     [JsonPropertyName("choices")] public List<Choice>? Choices { get; set; }
+    [JsonPropertyName("usage")] public ChatUsage? Usage { get; set; }
+}
+
+internal sealed class ChatUsage
+{
+    [JsonPropertyName("prompt_tokens")] public int PromptTokens { get; set; }
+    [JsonPropertyName("completion_tokens")] public int CompletionTokens { get; set; }
+    [JsonPropertyName("total_tokens")] public int TotalTokens { get; set; }
 }
 
 internal sealed class Choice
