@@ -84,6 +84,9 @@ try
             case "--base-url":
                 overrides["base_url"] = Value();
                 break;
+            case "--stop":
+                overrides["stop"] = Value();
+                break;
             default:
                 throw new ArgumentException($"неизвестный аргумент: {arg}.");
         }
@@ -163,6 +166,18 @@ double? presencePenalty = TryParseDouble(GetSetting("presence_penalty", null));
 double? frequencyPenalty = TryParseDouble(GetSetting("frequency_penalty", null));
 int? maxTokens = TryParseInt(GetSetting("max_tokens", null));
 
+string rawStop = GetSetting("stop", null);
+List<string>? stops = null;
+if (rawStop.Length > 0)
+{
+    stops = rawStop.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+    if (stops.Count == 0 || stops.Count > 16)
+    {
+        Console.Error.WriteLine("Ошибка: stop должен содержать от 1 до 16 последовательностей, разделённых '|'.");
+        return ExitUsage;
+    }
+}
+
 string rawTimeout = GetSetting("timeout_seconds", "120");
 double timeoutSeconds = double.TryParse(rawTimeout, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double timeoutVal) && timeoutVal > 0 ? timeoutVal : 120;
 
@@ -194,6 +209,7 @@ var payload = new ChatRequest
     PresencePenalty = presencePenalty,
     FrequencyPenalty = frequencyPenalty,
     Thinking = thinking,
+    Stop = stops,
 };
 
 string requestBody = JsonSerializer.Serialize(payload, JsonOpts);
@@ -324,10 +340,11 @@ void PrintUsage()
     Console.WriteLine("  --thinking <enabled|disabled|on|off>  режим рассуждений модели");
     Console.WriteLine("  --timeout, --timeout-seconds <сек>    таймаут запроса");
     Console.WriteLine("  --base-url <url>          адрес API (по умолчанию https://api.deepseek.com)");
+    Console.WriteLine("  --stop <seq1>|<seq2>...    до 16 последовательностей через '|'; API обрывает генерацию");
     Console.WriteLine("  Допустима форма --опция=значение, например --model=deepseek-v4-pro.");
     Console.WriteLine();
     Console.WriteLine("Файл настроек (ключ=значение): base_url, api_key, model, temperature, top_p, max_tokens,");
-    Console.WriteLine("presence_penalty, frequency_penalty, thinking, timeout_seconds.");
+    Console.WriteLine("presence_penalty, frequency_penalty, thinking, timeout_seconds, stop.");
     Console.WriteLine("api_key также можно задать переменными окружения LLM_API_KEY или DEEPSEEK_API_KEY.");
     Console.WriteLine();
     Console.WriteLine("Коды возврата: 0 — успех; 1 — ошибка API/сети; 2 — ошибка использования/конфига.");
@@ -344,6 +361,7 @@ internal sealed class ChatRequest
     [JsonPropertyName("presence_penalty")] public double? PresencePenalty { get; set; }
     [JsonPropertyName("frequency_penalty")] public double? FrequencyPenalty { get; set; }
     [JsonPropertyName("thinking")] public ChatThinking? Thinking { get; set; }
+    [JsonPropertyName("stop")] public List<string>? Stop { get; set; }
 }
 
 internal sealed class ChatMessage

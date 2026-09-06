@@ -10,6 +10,7 @@
 - `L1` — от `main`, базовая версия (указывает на `0490eac`).
 - `L2` — от `L1`, доработки: системный `master_prompt.txt`, `top_p`/`thinking`, фиксированный путь конфига `C:\Props\llm-cli.properties` (commit `7729aff`).
 - `L3` — от `main`, базовая версия.
+- `S1` — от `main`, доработка: нативные stop-последовательности — ключ конфига `stop` и CLI `--stop` (список через `|`, до 16, дефолт выключен).
 
 ## Правила (обязательно)
 - **Никогда не коммитить API-ключи** (`api_key`, токены) и реальный рабочий конфиг `C:\Props\llm-cli.properties`. В репозитории `app.properties` — только шаблон с пустым `api_key=`.
@@ -20,10 +21,11 @@
 - Значимые изменения фиксировать в `changes.md`.
 
 ## Конфигурация (справка)
-- Ключи файла настроек: `base_url`, `api_key`, `model`, `temperature`, `top_p`, `max_tokens`, `presence_penalty`, `frequency_penalty`, `timeout_seconds`, `thinking` (`enabled`|`disabled`). `api_key` также из env `LLM_API_KEY`/`DEEPSEEK_API_KEY`.
+- Ключи файла настроек: `base_url`, `api_key`, `model`, `temperature`, `top_p`, `max_tokens`, `presence_penalty`, `frequency_penalty`, `timeout_seconds`, `thinking` (`enabled`|`disabled`), `stop` (список через `|`, до 16). `api_key` также из env `LLM_API_KEY`/`DEEPSEEK_API_KEY`.
 - В версии `L2`: конфиг по умолчанию — фиксированный `C:\Props\llm-cli.properties` (вне репозитория); `master_prompt.txt` ищется рядом с exe, затем в текущей папке, и вставляется первым как `role=system`. Ветка `L2` ведётся как отдельная задача и CLI-флаги (см. ниже) в неё НЕ переносились.
-- **CLI-опции (в `main` и производных `L1`/`L3`/`L4`)**: параметры можно указывать прямо в командной строке, они **перекрывают** файл настроек. Приоритет: **опция CLI > файл настроек > значение по умолчанию**.
+- **CLI-опции (в `main` и производных `L1`/`L3`/`L4`/`S1`)**: параметры можно указывать прямо в командной строке, они **перекрывают** файл настроек. Приоритет: **опция CLI > файл настроек > значение по умолчанию**.
   - `--model|-m <id>`, `--temperature|-t <число>`, `--top-p <0..1>`, `--max-tokens <int>`, `--presence-penalty <число>`, `--frequency-penalty <число>`, `--thinking enabled|disabled|on|off`, `--timeout <сек>`, `--base-url <url>`. Допустима форма `--опция=значение`.
+  - `--stop <seq1>|<seq2>...` (в ветке `S1`) — последовательности, на которых API обрывает генерацию (до 16, дефолт выключен).
   - `--config|-c <путь>` — путь к файлу настроек; `-h|--help` — справка.
   - `api_key` через CLI не передаётся (только файл/env), чтобы ключ не попадал в список процессов.
   - **`top_k` API DeepSeek не поддерживает** — используйте `top_p`.
